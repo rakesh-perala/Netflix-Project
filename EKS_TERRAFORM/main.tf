@@ -1,6 +1,10 @@
-##########################
-# IAM Role for EKS Control Plane
-##########################
+provider "aws" {
+  region = "ap-south-1"
+}
+
+################################
+# IAM ROLE FOR EKS CLUSTER
+################################
 data "aws_iam_policy_document" "eks_assume_role" {
   statement {
     effect = "Allow"
@@ -20,56 +24,58 @@ resource "aws_iam_role" "eks_cluster_role" {
 }
 
 resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
   role       = aws_iam_role.eks_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
-##########################
-# VPC & Subnet Selection
-##########################
+resource "aws_iam_role_policy_attachment" "eks_vpc_controller" {
+  role       = aws_iam_role.eks_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
+}
+
+################################
+# DEFAULT VPC & SUBNETS
+################################
 data "aws_vpc" "default" {
   default = true
 }
 
-data "aws_subnets" "valid_subnets" {
+data "aws_subnets" "default" {
   filter {
     name   = "vpc-id"
     values = [data.aws_vpc.default.id]
   }
-
-  filter {
-    name   = "availability-zone"
-    values = ["us-east-1a", "us-east-1b", "us-east-1c"]
-  }
 }
 
-##########################
-# EKS Cluster
-##########################
-resource "aws_eks_cluster" "eks_cluster" {
-  name     = "eks-cluster"
+################################
+# EKS CLUSTER
+################################
+resource "aws_eks_cluster" "eks" {
+  name     = "EKS_CLUSTER"
+  version  = "1.29"
   role_arn = aws_iam_role.eks_cluster_role.arn
 
   vpc_config {
-    subnet_ids = data.aws_subnets.valid_subnets.ids
+    subnet_ids = data.aws_subnets.default.ids
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.eks_cluster_policy
+    aws_iam_role_policy_attachment.eks_cluster_policy,
+    aws_iam_role_policy_attachment.eks_vpc_controller
   ]
 }
 
-##########################
-# IAM Role for Node Group
-##########################
+################################
+# IAM ROLE FOR NODE GROUP
+################################
 resource "aws_iam_role" "eks_node_role" {
   name = "eks-node-group-cloud"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect    = "Allow"
-      Action    = "sts:AssumeRole"
+      Effect = "Allow"
+      Action = "sts:AssumeRole"
       Principal = {
         Service = "ec2.amazonaws.com"
       }
@@ -77,29 +83,29 @@ resource "aws_iam_role" "eks_node_role" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "worker_node_policy" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+resource "aws_iam_role_policy_attachment" "worker_policy" {
   role       = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
 }
 
 resource "aws_iam_role_policy_attachment" "cni_policy" {
+  role       = aws_iam_role.eks_node_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-  role       = aws_iam_role.eks_node_role.name
 }
 
-resource "aws_iam_role_policy_attachment" "ecr_readonly" {
+resource "aws_iam_role_policy_attachment" "ecr_policy" {
+  role       = aws_iam_role.eks_node_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-  role       = aws_iam_role.eks_node_role.name
 }
 
-##########################
-# Node Group
-##########################
-resource "aws_eks_node_group" "eks_node_group" {
-  cluster_name    = aws_eks_cluster.eks_cluster.name
+################################
+# EKS NODE GROUP
+################################
+resource "aws_eks_node_group" "node_group" {
+  cluster_name    = aws_eks_cluster.eks.name
   node_group_name = "node-cloud"
   node_role_arn   = aws_iam_role.eks_node_role.arn
-  subnet_ids      = data.aws_subnets.valid_subnets.ids
+  subnet_ids      = data.aws_subnets.default.ids
 
   scaling_config {
     desired_size = 1
@@ -110,8 +116,8 @@ resource "aws_eks_node_group" "eks_node_group" {
   instance_types = ["t3.medium"]
 
   depends_on = [
-    aws_iam_role_policy_attachment.worker_node_policy,
+    aws_iam_role_policy_attachment.worker_policy,
     aws_iam_role_policy_attachment.cni_policy,
-    aws_iam_role_policy_attachment.ecr_readonly
+    aws_iam_role_policy_attachment.ecr_policy
   ]
 }
