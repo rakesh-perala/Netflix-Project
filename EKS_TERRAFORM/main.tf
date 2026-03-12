@@ -45,8 +45,11 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
 resource "aws_eks_cluster" "eks_cluster" {
   name     = "devops-eks-cluster"
   role_arn = aws_iam_role.eks_cluster_role.arn
+  version  = "1.29"
 
-  version = "1.29"
+  access_config {
+    authentication_mode = "API_AND_CONFIG_MAP"
+  }
 
   vpc_config {
     subnet_ids = data.aws_subnets.default.ids
@@ -126,10 +129,6 @@ resource "aws_eks_access_entry" "admin_access" {
   cluster_name  = aws_eks_cluster.eks_cluster.name
   principal_arn = "arn:aws:iam::679968874516:user/devops-admin"
   type          = "STANDARD"
-
-  depends_on = [
-    aws_eks_cluster.eks_cluster
-  ]
 }
 
 resource "aws_eks_access_policy_association" "admin_policy" {
@@ -144,16 +143,12 @@ resource "aws_eks_access_policy_association" "admin_policy" {
 }
 
 # -----------------------------
-# EKS Access for Root User
+# EKS Access for Root
 # -----------------------------
 resource "aws_eks_access_entry" "root_access" {
   cluster_name  = aws_eks_cluster.eks_cluster.name
   principal_arn = "arn:aws:iam::679968874516:root"
   type          = "STANDARD"
-
-  depends_on = [
-    aws_eks_cluster.eks_cluster
-  ]
 }
 
 resource "aws_eks_access_policy_association" "root_admin" {
